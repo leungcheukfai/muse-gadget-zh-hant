@@ -23,13 +23,16 @@
 #include "esp_app_desc.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
+#include "sdkconfig.h"
 
 #include "muse_audio.h"
 #include "muse_battery.h"
 #include "muse_ble.h"
 #include "muse_board.h"
 #include "muse_chat.h"
+#include "muse_font.h"
 #include "muse_input.h"
+#include "muse_lang.h"
 #include "muse_keypad.h"
 #include "muse_link.h"
 #include "muse_settings.h"
@@ -60,7 +63,7 @@ typedef void (*text_done_cb_t)(const char *text);
 static int s_text_scale = 466;
 static lv_obj_t *s_tile;
 static lv_obj_t *s_current;
-static lv_obj_t *s_home, *s_wifi, *s_hatch, *s_ble, *s_sound, *s_sleep, *s_battery, *s_power, *s_text;
+static lv_obj_t *s_home, *s_wifi, *s_hatch, *s_ble, *s_sound, *s_sleep, *s_battery, *s_power, *s_language, *s_text;
 
 /*
  * Only home is kept. A sub-page is built when it opens and deleted on the way
@@ -73,7 +76,8 @@ typedef struct {
 } page_t;
 
 /* Home values. */
-static lv_obj_t *s_home_wifi, *s_home_hatch, *s_home_ble, *s_home_sound, *s_home_sleep, *s_home_battery, *s_about;
+static lv_obj_t *s_home_wifi, *s_home_hatch, *s_home_ble, *s_home_sound, *s_home_sleep, *s_home_battery,
+    *s_home_language, *s_about;
 
 /* Wi-Fi page. */
 static lv_obj_t *s_wifi_sw, *s_wifi_status, *s_wifi_saved, *s_wifi_scan_btn, *s_wifi_scan_lbl, *s_wifi_list;
@@ -93,6 +97,9 @@ static int64_t s_link_reset_armed_us;
 
 /* Bluetooth page. */
 static lv_obj_t *s_ble_sw, *s_ble_status;
+
+/* Spoken reply language page. */
+static lv_obj_t *s_language_cantonese, *s_language_mandarin, *s_language_fish_status;
 
 /* Sound page. */
 static lv_obj_t *s_spk_sw, *s_vol_val, *s_vol_sl, *s_gain_val, *s_gain_sl, *s_bright_val, *s_bright_sl, *s_mic_bar, *s_mic_val;
@@ -124,16 +131,16 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, 
 {
     char shown[SHOWN_MAX];
     lv_obj_t *l = lv_label_create(parent);
-    lv_obj_set_style_text_font(l, font, 0);
+    lv_obj_set_style_text_font(l, muse_font_for_ui(font), 0);
     lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
-    lv_label_set_text(l, muse_text_showable(text, shown, sizeof(shown)));
+    lv_label_set_text(l, muse_text_showable(muse_lang_get(text), shown, sizeof(shown)));
     return l;
 }
 
 static void set_text(lv_obj_t *l, const char *text)
 {
     char shown[SHOWN_MAX];
-    text = muse_text_showable(text, shown, sizeof(shown));
+    text = muse_text_showable(muse_lang_get(text), shown, sizeof(shown));
     if (strcmp(lv_label_get_text(l), text) != 0) {
         lv_label_set_text(l, text);
     }
@@ -359,7 +366,8 @@ static lv_obj_t *info_row(lv_obj_t *list, const char *text)
 
 static void drop(lv_obj_t *p)
 {
-    lv_obj_t **const pages[] = { &s_wifi, &s_hatch, &s_ble, &s_sound, &s_sleep, &s_battery, &s_power, &s_text };
+    lv_obj_t **const pages[] = { &s_wifi, &s_hatch, &s_ble, &s_sound, &s_sleep, &s_battery,
+                                 &s_power, &s_language, &s_text };
     for (size_t i = 0; i < sizeof(pages) / sizeof(pages[0]); i++) {
         if (*pages[i] == p) {
             *pages[i] = NULL;
@@ -458,7 +466,7 @@ static void on_text_show(lv_event_t *e)
     (void)e;
     bool pw = !lv_textarea_get_password_mode(s_text_ta);
     lv_textarea_set_password_mode(s_text_ta, pw);
-    lv_label_set_text(lv_obj_get_child(s_text_show, 0), pw ? "Show" : "Hide");
+    lv_label_set_text(lv_obj_get_child(s_text_show, 0), muse_lang_get(pw ? "Show" : "Hide"));
 }
 
 /* Beside the keyboard's field, a button to show a password. */
@@ -468,7 +476,7 @@ static void fit_show_button(bool password)
     lv_obj_set_width(s_text_ta, password ? w - show_w - gap : w);
     lv_obj_align(s_text_ta, LV_ALIGN_TOP_MID, password ? -(show_w + gap) / 2 : 0, text_y(76));
     lv_obj_align(s_text_show, LV_ALIGN_TOP_MID, (w - show_w) / 2, text_y(76));
-    lv_label_set_text(lv_obj_get_child(s_text_show, 0), "Show");
+    lv_label_set_text(lv_obj_get_child(s_text_show, 0), muse_lang_get("Show"));
     if (password) {
         lv_obj_remove_flag(s_text_show, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -739,7 +747,13 @@ static bool rebuild_scan_list(void)
         bool saved = is_saved(s_aps[i].ssid);
         saved_seen |= saved;
         char buf[24];
-        snprintf(buf, sizeof(buf), "%s%d dBm", saved ? "saved  " : (s_aps[i].secure ? "" : "open  "), s_aps[i].rssi);
+        if (saved) {
+            muse_lang_snprintf(buf, sizeof(buf), "saved  %d dBm", s_aps[i].rssi);
+        } else if (!s_aps[i].secure) {
+            muse_lang_snprintf(buf, sizeof(buf), "open  %d dBm", s_aps[i].rssi);
+        } else {
+            snprintf(buf, sizeof(buf), "%d dBm", s_aps[i].rssi);
+        }
         lv_label_set_text(v, buf);
     }
     if (gen && !n) {
@@ -787,17 +801,17 @@ static void tick_wifi(void)
         strlcpy(buf, "No saved networks. Scan and pick one.", sizeof(buf));
         break;
     case MUSE_WIFI_CONNECTING:
-        snprintf(buf, sizeof(buf), "Joining %s\n%s", w.ssid, w.detail);
+        muse_lang_snprintf(buf, sizeof(buf), "Joining %s\n%s", w.ssid, muse_lang_get(w.detail));
         break;
     case MUSE_WIFI_CONNECTED:
-        snprintf(buf, sizeof(buf), "Connected to %s\n%s  -  %d dBm", w.ssid, w.ip, w.rssi);
+        muse_lang_snprintf(buf, sizeof(buf), "Connected to %s\n%s  -  %d dBm", w.ssid, w.ip, w.rssi);
         break;
     case MUSE_WIFI_NOT_NEARBY:
         strlcpy(buf, "No saved network nearby\nLooking again within a minute", sizeof(buf));
         break;
     case MUSE_WIFI_FAILED:
     default:
-        snprintf(buf, sizeof(buf), "Couldn't join %s\n%s", w.ssid, w.detail);
+        muse_lang_snprintf(buf, sizeof(buf), "Couldn't join %s\n%s", w.ssid, muse_lang_get(w.detail));
         break;
     }
     set_text(s_wifi_status, buf);
@@ -893,8 +907,9 @@ static void build_hatch_page(lv_obj_t *tile)
 static void tick_hatch(void)
 {
     char link[64];
-    snprintf(link, sizeof(link), "Muse app: %s\n%s", muse_link_hatch_linked() ? "paired" : "not paired",
-             muse_link_state_name(muse_link_state()));
+    muse_lang_snprintf(link, sizeof(link), "Muse app: %s\n%s",
+                       muse_lang_get(muse_link_hatch_linked() ? "paired" : "not paired"),
+                       muse_lang_get(muse_link_state_name(muse_link_state())));
     set_text(s_link_status, link);
     if (s_link_reset_armed_us && esp_timer_get_time() - s_link_reset_armed_us >= 5000000) {
         s_link_reset_armed_us = 0;
@@ -904,7 +919,8 @@ static void tick_hatch(void)
     muse_hatch_status_t h;
     muse_hatch_status(&h);
     char buf[96];
-    snprintf(buf, sizeof(buf), "%s\n%s", muse_hatch_state_name(h.state), h.detail);
+    muse_lang_snprintf(buf, sizeof(buf), "%s\n%s", muse_lang_get(muse_hatch_state_name(h.state)),
+                       muse_lang_get(h.detail));
     set_text(s_hatch_status, buf);
     lv_obj_set_style_text_color(s_hatch_status, lv_color_hex(h.state == MUSE_HATCH_REACHABLE ? COLOR_OK :
                                                              h.state == MUSE_HATCH_UNREACHABLE ? COLOR_WARN : COLOR_DIM), 0);
@@ -915,7 +931,11 @@ static void tick_hatch(void)
     set_text(s_hatch_host, host);
     set_text(s_hatch_vm, vm[0] ? vm : "Not set");
     size_t n = muse_settings_hatch_token_len();
-    snprintf(buf, sizeof(buf), n ? "Set (%u chars)" : "Not set", (unsigned)n);
+    if (n) {
+        muse_lang_snprintf(buf, sizeof(buf), "Set (%u chars)", (unsigned)n);
+    } else {
+        strlcpy(buf, muse_lang_get("Not set"), sizeof(buf));
+    }
     set_text(s_hatch_token, buf);
 }
 
@@ -953,11 +973,12 @@ static void tick_ble(void)
         strlcpy(buf, "Off", sizeof(buf));
         break;
     case MUSE_BLE_ADVERTISING:
-        snprintf(buf, sizeof(buf), "Visible as %s", b.name);
+        muse_lang_snprintf(buf, sizeof(buf), "Visible as %s", b.name);
         break;
     case MUSE_BLE_CONNECTED:
     default:
-        snprintf(buf, sizeof(buf), "Phone connected\n%s", b.secure ? "Paired" : "Waiting for pairing");
+        muse_lang_snprintf(buf, sizeof(buf), "Phone connected\n%s",
+                           muse_lang_get(b.secure ? "Paired" : "Waiting for pairing"));
         break;
     }
     set_text(s_ble_status, buf);
@@ -1165,7 +1186,11 @@ static void tick_battery(void)
     if (!b.started) {
         strlcpy(buf, p.battery_pct < 0 ? "No battery" : "Unplug USB to start measuring.", sizeof(buf));
     } else {
-        snprintf(buf, sizeof(buf), b.running ? "On battery for %s" : "Last run: %s on battery", t);
+        if (b.running) {
+            muse_lang_snprintf(buf, sizeof(buf), "On battery for %s", t);
+        } else {
+            muse_lang_snprintf(buf, sizeof(buf), "Last run: %s on battery", t);
+        }
     }
     set_text(s_batt_status, buf);
 
@@ -1186,10 +1211,10 @@ static void tick_battery(void)
     } else if (muse_battery_drain(&b, &rate10, &full_h)) {
         snprintf(buf, sizeof(buf), "%d%%, %d.%d%%/h", used, rate10 / 10, rate10 % 10);
         set_text(s_batt_drain, buf);
-        snprintf(buf, sizeof(buf), "lasts ~%d h", full_h);
+        muse_lang_snprintf(buf, sizeof(buf), "lasts ~%d h", full_h);
         set_text(s_batt_full, buf);
     } else {
-        snprintf(buf, sizeof(buf), "%d%% so far", used > 0 ? used : 0);
+        muse_lang_snprintf(buf, sizeof(buf), "%d%% so far", used > 0 ? used : 0);
         set_text(s_batt_drain, buf);
         set_text(s_batt_full, "measuring");
     }
@@ -1206,7 +1231,7 @@ static void tick_battery(void)
     }
     buf[0] = '\0';
     if (b.started && b.awake[0]) {
-        snprintf(buf, sizeof(buf), "Also kept awake by: %s", b.awake);
+        muse_lang_snprintf(buf, sizeof(buf), "Also kept awake by: %s", b.awake);
     }
     set_text(s_batt_awake, buf);
 }
@@ -1229,9 +1254,45 @@ static void build_power_page(lv_obj_t *tile)
     button(list, LV_SYMBOL_POWER "  Power off", COLOR_DANGER, on_power_off, NULL);
     button(list, "Cancel", COLOR_TEXT, on_back, NULL);
     char text[128];
-    snprintf(text, sizeof(text), "Press the %s button to turn it back on. To just turn the screen off, press the %s button.",
-             muse_board->talk_button, muse_board->aux_button);
+    muse_lang_snprintf(text, sizeof(text),
+                       "Press the %s button to turn it back on. To just turn the screen off, press the %s button.",
+                       muse_board->talk_button, muse_board->aux_button);
     note(list, text);
+}
+
+/* ---------- Reply language ---------- */
+
+static void on_language_cantonese(lv_event_t *e)
+{
+    (void)e;
+    muse_settings_set_reply_language(MUSE_REPLY_CANTONESE);
+}
+
+static void on_language_mandarin(lv_event_t *e)
+{
+    (void)e;
+    muse_settings_set_reply_language(MUSE_REPLY_MANDARIN);
+}
+
+static void build_language_page(lv_obj_t *tile)
+{
+    lv_obj_t *list;
+    s_language = page(tile, "LANGUAGE & SPEECH", true, &list);
+    note(list, "Fish Audio supports Cantonese and Mandarin. Traditional Chinese captions stay on screen.");
+    row(list, NULL, "Cantonese", &s_language_cantonese, on_language_cantonese, NULL);
+    row(list, NULL, "Mandarin", &s_language_mandarin, on_language_mandarin, NULL);
+    s_language_fish_status = note(list, "");
+    note(list, "Enter your Fish Audio API key and voice IDs in Phone setup to enable speech.");
+}
+
+static void tick_language(void)
+{
+    bool cantonese = muse_settings_reply_language() == MUSE_REPLY_CANTONESE;
+    set_text(s_language_cantonese, cantonese ? "Selected" : "");
+    set_text(s_language_mandarin, cantonese ? "" : "Selected");
+    set_text(s_language_fish_status, muse_settings_fish_api_key_len()
+                                         ? "Fish Audio: API key saved"
+                                         : "Fish Audio: API key not set");
 }
 
 /* ---------- Home ---------- */
@@ -1243,6 +1304,7 @@ static const page_t SOUND = { &s_sound, build_sound_page };
 static const page_t SLEEP = { &s_sleep, build_sleep_page };
 static const page_t BATTERY = { &s_battery, build_battery_page };
 static const page_t POWER = { &s_power, build_power_page };
+static const page_t LANGUAGE = { &s_language, build_language_page };
 
 static void build_home(lv_obj_t *tile)
 {
@@ -1254,6 +1316,7 @@ static void build_home(lv_obj_t *tile)
     row(list, LV_SYMBOL_VOLUME_MAX, "Sound", &s_home_sound, on_nav, (void *)&SOUND);
     row(list, LV_SYMBOL_EYE_CLOSE, "Sleep", &s_home_sleep, on_nav, (void *)&SLEEP);
     row(list, LV_SYMBOL_BATTERY_FULL, "Battery", &s_home_battery, on_nav, (void *)&BATTERY);
+    row(list, LV_SYMBOL_VOLUME_MAX, "Language & speech", &s_home_language, on_nav, (void *)&LANGUAGE);
     row(list, LV_SYMBOL_POWER, "Power off", NULL, on_nav, (void *)&POWER);
     s_about = note(list, "");
 }
@@ -1279,6 +1342,7 @@ static void tick_home(void)
         set_text(s_home_sound, "Muted");
     }
     set_text(s_home_sleep, sleep_name(muse_settings_sleep_s()));
+    set_text(s_home_language, muse_settings_reply_language() == MUSE_REPLY_CANTONESE ? "Cantonese" : "Mandarin");
 
     muse_power_t p = muse_state_power();
     char buf[96];
@@ -1331,6 +1395,8 @@ void muse_settings_ui_tick(bool visible)
         tick_sleep();
     } else if (s_current == s_battery) {
         tick_battery();
+    } else if (s_current == s_language) {
+        tick_language();
     }
 }
 

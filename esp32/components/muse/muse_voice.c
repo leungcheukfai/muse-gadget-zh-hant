@@ -33,10 +33,14 @@
 #include "muse_board.h"
 #include "muse_chat.h"
 #include "muse_input.h"
+#include "muse_lang.h"
 #include "muse_mem.h"
 #include "muse_settings.h"
 #include "muse_state.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+#include "muse_wake.h"
+#endif
 
 static const char *TAG = "muse_voice";
 
@@ -44,13 +48,17 @@ static const char *TAG = "muse_voice";
 #define TAIL_FRAMES (MUSE_AUDIO_RATE * 12 / 100)   /* capture lag + poll interval, stops before the release click */
 #define MAX_FRAMES (MUSE_AUDIO_RATE * MAX_SECS)
 #define MIN_HELD_FRAMES (MUSE_AUDIO_RATE * 3 / 10)   /* shorter presses are taps, not speech */
-#if CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV
+#if CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+#define PRE_CHUNKS 60                                   /* 1.2 s so detection latency does not clip the command */
+#elif CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV
 #define PRE_CHUNKS 6                                   /* 120 ms; a 320 ms upload burst stalls on the ADV */
 #else
 #define PRE_CHUNKS 16                                  /* 320 ms of audio kept from before the press */
 #endif
 #define SETTLE_CHUNKS 10   /* after Muse makes a sound, 200 ms of capture is its own tail */
 #define REST_BACKSTOP_MS 60000
+#define AUTO_SILENCE_DBFS -42.0f
+#define AUTO_SILENCE_FRAMES (MUSE_AUDIO_RATE * 12 / 10)
 
 #if CONFIG_MUSE_HATCH
 /* A note recorded while Hatch is out of reach is saved in PSRAM, and goes once it's back. */
@@ -137,14 +145,17 @@ static void pre_reset(void)
 {
     s_pre_fill = 0;
     s_settle = SETTLE_CHUNKS;
+#if CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+    muse_wake_reset();
+#endif
 }
 
 /* One 20 ms idle read: feeds the pre-roll ring and the settings mic meter. */
-static void idle_capture(void)
+static bool idle_capture(void)
 {
     if (muse_audio_read(s_chunk, MUSE_AUDIO_CHUNK) != ESP_OK) {
         vTaskDelay(pdMS_TO_TICKS(20));
-        return;
+        return false;
     }
     if (s_monitor) {
         float db = muse_audio_dbfs(s_chunk, MUSE_AUDIO_CHUNK);
@@ -152,7 +163,7 @@ static void idle_capture(void)
     }
     if (s_settle > 0) {
         s_settle--;
-        return;
+        return false;
     }
     pre_chunk_t *c = &s_pre[s_pre_next];
 #if MUSE_LOW_MEM
@@ -163,6 +174,18 @@ static void idle_capture(void)
 #endif
     s_pre_next = (s_pre_next + 1) % PRE_CHUNKS;
     s_pre_fill = s_pre_fill < PRE_CHUNKS ? s_pre_fill + 1 : PRE_CHUNKS;
+#if CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+    if (!muse_wake_enabled()) {
+        return false;
+    }
+    bool detected = muse_wake_process(s_chunk, MUSE_AUDIO_CHUNK);
+    if (!muse_wake_enabled()) {
+        muse_state_set_caption("%s", muse_lang_get("PRESS TALK"));
+    }
+    return detected;
+#else
+    return false;
+#endif
 }
 
 /* Non-blocking: returns true if an event of `type` arrived (others dropped). */
@@ -239,14 +262,27 @@ static void take(rec_stats_t *st, const int16_t *pcm)
 }
 
 /*
- * Records speech until release or MAX_SECS, starting with the pre-roll; *held
- * gets the part after the press. It streams to Hatch as it goes if it can.
+ * Records from pre-roll until PTT release, hands-free trailing silence, or
+ * MAX_SECS; *held gets the part after pre-roll. It streams to Hatch as it goes if it can.
  * If not, the note is kept in s_rec to send later, and streams from partway
  * if Hatch comes within reach. Returns false if Hatch failed the turn with no
  * kept note to fall back on (why says what failed). There is no start chirp:
  * anything played now would land on top of the first words.
  */
-static bool record(bool barge_in, size_t *held, char *why, size_t cap)
+static void auto_silence_track(bool hands_free, const int16_t *pcm, bool *speech_seen, size_t *quiet_frames)
+{
+    if (!hands_free) {
+        return;
+    }
+    if (muse_audio_dbfs(pcm, MUSE_AUDIO_CHUNK) > AUTO_SILENCE_DBFS) {
+        *speech_seen = true;
+        *quiet_frames = 0;
+    } else if (*speech_seen) {
+        *quiet_frames += MUSE_AUDIO_CHUNK;
+    }
+}
+
+static bool record(bool barge_in, bool hands_free, size_t *held, char *why, size_t cap)
 {
     muse_state_set_mode(MUSE_MODE_LISTENING);
     muse_state_set_progress(0);
@@ -262,6 +298,9 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
     rec_stats_t st = { 0 };
 
     size_t n = 0;
+    size_t stop_at = MAX_FRAMES;
+    size_t quiet_frames = 0;
+    bool speech_seen = false;
     if (barge_in) {
         /* Pressed during playback: the queued tail of the reply is still sounding. */
         for (int i = 0; i < SETTLE_CHUNKS; i++) {
@@ -271,18 +310,23 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
         for (size_t i = 0; i < s_pre_fill; i++) {
             pre_get(i, s_chunk);
             take(&st, s_chunk);
+            auto_silence_track(hands_free, s_chunk, &speech_seen, &quiet_frames);
             n += MUSE_AUDIO_CHUNK;
         }
     }
     size_t pre = n;
     bool released = false;
-    size_t stop_at = MAX_FRAMES;
+    if (hands_free && speech_seen && quiet_frames >= AUTO_SILENCE_FRAMES) {
+        stop_at = n + TAIL_FRAMES < MAX_FRAMES ? n + TAIL_FRAMES : MAX_FRAMES;
+        released = true;
+    }
     while (n + MUSE_AUDIO_CHUNK <= stop_at) {
         if (muse_audio_read(s_chunk, MUSE_AUDIO_CHUNK) != ESP_OK) {
             break;
         }
         muse_state_set_level(muse_audio_level(s_chunk, MUSE_AUDIO_CHUNK));
         take(&st, s_chunk);
+        auto_silence_track(hands_free, s_chunk, &speech_seen, &quiet_frames);
         /* Live transcript as the caption. A failure stops the streaming; the
          * kept note goes later, or without one the failure is the caption. */
         muse_hatch_ev_t ev;
@@ -303,6 +347,10 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
             }
         }
         n += MUSE_AUDIO_CHUNK;
+        if (hands_free && !released && speech_seen && quiet_frames >= AUTO_SILENCE_FRAMES) {
+            released = true;
+            stop_at = n + TAIL_FRAMES < MAX_FRAMES ? n + TAIL_FRAMES : MAX_FRAMES;
+        }
         bool tick = n % (MUSE_AUDIO_CHUNK * 5) == 0;
         if (tick && s_rec && !s_live && !gave_up && !s_held_count && muse_hatch_ready()) {
             ESP_LOGI(TAG, "Muse in reach: streaming the note so far");
@@ -310,7 +358,10 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
         }
         muse_state_set_progress((float)n / MAX_FRAMES);
         if (!heard && ok && tick) {
-            muse_state_set_caption("%s %.1fs", s_live ? "LISTENING" : "RECORDING", (double)n / MUSE_AUDIO_RATE);
+        char caption[48];
+        muse_lang_snprintf(caption, sizeof(caption), "%s %.1fs",
+                           muse_lang_get(s_live ? "LISTENING" : "RECORDING"), (double)n / MUSE_AUDIO_RATE);
+        muse_state_set_caption("%s", caption);
         }
         /*
          * Capture runs 60-80 ms behind real time and people let go on their
@@ -433,6 +484,14 @@ static void go_idle(const char *caption)
 {
     muse_state_set_progress(0);
     muse_state_set_mode(MUSE_MODE_IDLE);
+    if (!caption) {
+        caption = "";
+    }
+#if CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+    if (!caption[0] && muse_wake_enabled()) {
+        caption = muse_lang_get("SAY HEY MUSE");
+    }
+#endif
     muse_state_set_caption("%s", caption);
 }
 
@@ -462,6 +521,9 @@ static void set_resting(bool rest)
         return;
     }
     s_resting = rest;
+#if CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+    muse_wake_reset();
+#endif
     muse_audio_power(!rest);
     muse_hatch_set_resting(rest);
     if (rest) {
@@ -791,6 +853,7 @@ static void voice_task(void *arg)
     bool pending_down = false;
     muse_audio_selftest();
     for (;;) {
+        bool hands_free = false;
         bool wake = false;
         if (!pending_down) {
             muse_input_event_t ev;
@@ -844,15 +907,22 @@ static void voice_task(void *arg)
                 pre_reset();
             }
             /* The 20 ms read paces this loop. */
-            idle_capture();
-            if (xQueueReceive(s_queue, &ev, 0) != pdTRUE) {
+            bool detected = idle_capture();
+            if (xQueueReceive(s_queue, &ev, 0) == pdTRUE) {
+                muse_state_poke();
+                if (ev.type != MUSE_PTT_DOWN) {
+                    if (!detected) {
+                        continue;
+                    }
+                    hands_free = true;
+                } else {
+                    wake = ev.wake;
+                }
+            } else if (detected) {
+                hands_free = true;
+            } else {
                 continue;
             }
-            muse_state_poke();
-            if (ev.type != MUSE_PTT_DOWN) {
-                continue;
-            }
-            wake = ev.wake;
         }
         if (wake && !held_on_waking()) {
             continue;   /* a tap: it only woke Muse */
@@ -860,13 +930,18 @@ static void voice_task(void *arg)
         muse_wifi_power(MUSE_WIFI_FULL);
         if (!can_record()) {
             pending_down = false;
+#if CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+            if (hands_free) {
+                pre_reset();
+            }
+#endif
             continue;
         }
         size_t held;
         char why[96];
-        bool ok = record(pending_down, &held, why, sizeof(why));
+        bool ok = record(pending_down, hands_free, &held, why, sizeof(why));
         pending_down = false;
-        if (held < MIN_HELD_FRAMES && !wake) {
+        if (held < MIN_HELD_FRAMES && !wake && !hands_free) {
             muse_hatch_turn_cancel();
             drop_rec();
             pre_reset();
@@ -896,6 +971,11 @@ esp_err_t muse_voice_start(QueueHandle_t queue)
         muse_state_set_caption("AUDIO INIT FAILED");
         return ESP_FAIL;
     }
+#if CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+    if (muse_wake_init() != ESP_OK) {
+        ESP_LOGW(TAG, "Hey Muse detector unavailable; push-to-talk remains active");
+    }
+#endif
     /* Stack in PSRAM if there is any (this task never writes flash) to spare internal RAM for Wi-Fi/BLE. */
     if (xTaskCreatePinnedToCoreWithCaps(voice_task, "muse_voice", 6144, NULL, 6, NULL, MUSE_AUDIO_CORE,
                                         MUSE_BIG_CAPS) != pdPASS) {

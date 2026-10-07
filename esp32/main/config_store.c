@@ -16,6 +16,7 @@
 
 #include "config_store.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "nvs.h"
@@ -40,6 +41,11 @@ static bool nvs_encryption_possible(void) {
         return true;
     }
     ESP_LOGI(TAG, "no HMAC key in eFuse block %d", CONFIG_NVS_SEC_HMAC_EFUSE_KEY_ID);
+#if CONFIG_HOMEHUB_NVS_REQUIRE_EXISTING_HMAC
+    ESP_LOGE(TAG, "encrypted NVS requires a pre-provisioned HMAC_UP key in eFuse block %d; refusing first-boot key generation",
+             CONFIG_NVS_SEC_HMAC_EFUSE_KEY_ID);
+    abort();
+#endif
     if (esp_efuse_read_field_bit(ESP_EFUSE_WR_DIS_RD_DIS)) {
         ESP_LOGE(TAG, "NVS encryption is configured but the eFuse state cannot "
                  "support it; refusing to fall back to plaintext");

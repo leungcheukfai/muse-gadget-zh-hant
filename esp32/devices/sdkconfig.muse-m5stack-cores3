@@ -22,6 +22,7 @@
 # Load last, after sdkconfig.defaults and sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_MUSE_BOARD_M5STACK_CORES3=y
+CONFIG_MUSE_CJK_FONT=y
 # The AW88298 and 1 W speaker are quiet at the usual 70%.
 CONFIG_MUSE_DEFAULT_VOLUME=100
 # Unused by Muse builds (the talk button confirms pairing); GPIO0 is I2S MCLK here.
@@ -53,3 +54,11 @@ CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
 # Keep the BSP's SPI transfer allocation and our LVGL buffers small.
 CONFIG_BSP_LCD_DRAW_BUF_HEIGHT=10
 CONFIG_BSP_LCD_DRAW_BUF_DOUBLE=y
+
+# Fish Audio keys and device settings use encrypted NVS. Provision eFuse block 0
+# with an HMAC_UP key before flashing; the firmware refuses to generate one.
+CONFIG_HOMEHUB_NVS_ENCRYPTION=y
+CONFIG_HOMEHUB_NVS_REQUIRE_EXISTING_HMAC=y
+CONFIG_NVS_ENCRYPTION=y
+CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC=y
+CONFIG_NVS_SEC_HMAC_EFUSE_KEY_ID=0

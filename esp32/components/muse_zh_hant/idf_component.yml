@@ -1,0 +1,12 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# SPDX-License-Identifier: Apache-2.0
+
+dependencies:
+  idf:
+    version: ">=5.5"
+  espressif/cjson: "~1.7"
+  lvgl/lvgl:
+    version: "9.5.0"
+    public: true
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} != \"none\""

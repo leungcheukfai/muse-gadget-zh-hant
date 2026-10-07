@@ -35,6 +35,8 @@
 #include "muse_board.h"
 #include "muse_chat.h"
 #include "muse_console.h"
+#include "muse_font.h"
+#include "muse_lang.h"
 #include "muse_link.h"
 #include "muse_mem.h"
 #include "muse_menu.h"
@@ -448,21 +450,12 @@ static const lv_font_t *font_pick(const lv_font_t *full, const lv_font_t *compac
     return s_small ? compact : full;
 }
 
-#if CONFIG_MUSE_CJK_FONT
-LV_FONT_DECLARE(muse_font_cjk_16)
-#endif
-
 /* unscii-16 for captions and replies; with CONFIG_MUSE_CJK_FONT, a copy that
  * falls back to Unifont's 16x16 CJK, the same cell, for what unscii lacks. */
 static const lv_font_t *caption_font(void)
 {
 #if CONFIG_MUSE_CJK_FONT
-    static lv_font_t font;
-    if (!font.get_glyph_dsc) {
-        font = lv_font_unscii_16;
-        font.fallback = &muse_font_cjk_16;
-    }
-    return &font;
+    return muse_font_for_ui(&lv_font_unscii_16);
 #else
     return &lv_font_unscii_16;
 #endif
@@ -471,7 +464,7 @@ static const lv_font_t *caption_font(void)
 static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color)
 {
     lv_obj_t *l = lv_label_create(parent);
-    lv_obj_set_style_text_font(l, font, 0);
+    lv_obj_set_style_text_font(l, muse_font_for_ui(font), 0);
     lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(l, "");
@@ -1054,7 +1047,8 @@ static void build_overlays(void)
     lv_obj_set_style_radius(s_camera_hint, 18, 0);
     lv_obj_add_flag(s_camera_hint, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *hint_text = lv_label_create(s_camera_hint);
-    lv_label_set_text(hint_text, "TAP TO TAKE PHOTO");
+    lv_obj_set_style_text_font(hint_text, muse_font_for_ui(&lv_font_montserrat_16), 0);
+    lv_label_set_text(hint_text, muse_lang_get("TAP TO TAKE PHOTO"));
     lv_obj_center(hint_text);
     lv_obj_add_event_cb(s_camera_hint, on_camera_hint_clicked, LV_EVENT_CLICKED, NULL);
 #endif
@@ -1078,11 +1072,11 @@ static void build_overlays(void)
     lv_obj_remove_flag(s_pair, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_pair, LV_OBJ_FLAG_HIDDEN);
     s_pair_title = make_label(s_pair, font_pick(&lv_font_montserrat_20, FONT_COMPACT), COLOR_LIT);
-    lv_label_set_text(s_pair_title, "Pairing code");
+    lv_label_set_text(s_pair_title, muse_lang_get("Pairing code"));
     s_pair_code = make_label(s_pair, font_pick(&lv_font_montserrat_28, &lv_font_montserrat_20), COLOR_ACCENT);
     lv_obj_set_style_text_letter_space(s_pair_code, s_small ? 2 : 6, 0);
     s_pair_hint = make_label(s_pair, font_pick(&lv_font_montserrat_14, FONT_COMPACT), COLOR_DIM);
-    lv_label_set_text(s_pair_hint, s_small ? "Enter on phone" : "Enter it on your phone");
+    lv_label_set_text(s_pair_hint, muse_lang_get(s_small ? "Enter on phone" : "Enter it on your phone"));
     /* Wraps: "bottom right button" is wider than the AIPI's card. */
     lv_obj_set_width(s_pair_hint, lv_pct(100));
     lv_label_set_long_mode(s_pair_hint, LV_LABEL_LONG_MODE_WRAP);
@@ -1246,7 +1240,8 @@ static void update_chrome(float now)
                 strlcpy(hint, "Tap to confirm pairing", sizeof(hint));
             } else {
                 strlcpy(code, s_small ? "Press" : "Press button", sizeof(code));
-                snprintf(hint, sizeof(hint), s_small ? "%s button" : "Press the %s button", muse_board->talk_button);
+                muse_lang_snprintf(hint, sizeof(hint), s_small ? "%s button" : "Press the %s button",
+                                   muse_board->talk_button);
             }
         } else {
             snprintf(code, sizeof(code), "%06lu", (unsigned long)b.passkey);
@@ -1255,8 +1250,8 @@ static void update_chrome(float now)
         const char *title = confirm ? (s_small ? "Muse app" : "Pair with Muse app") : "Pairing code";
         if (strcmp(code, lv_label_get_text(s_pair_code)) != 0) {
             lv_label_set_text(s_pair_code, code);
-            lv_label_set_text(s_pair_title, title);
-            lv_label_set_text(s_pair_hint, hint);
+            lv_label_set_text(s_pair_title, muse_lang_get(title));
+            lv_label_set_text(s_pair_hint, muse_lang_get(hint));
         }
     }
     lv_obj_set_flag(s_pair, LV_OBJ_FLAG_HIDDEN, !b.passkey && !confirm);
@@ -1317,20 +1312,19 @@ static void update_power(float now)
         strlcpy(buf, p.usb ? (s_small ? "USB" : "USB POWER") : "", sizeof(buf));
     } else if (s_small) {
         snprintf(buf, sizeof(buf), "%s%d%%", p.charging ? "+" : "", p.battery_pct);
-    } else if (p.charging) {
-        snprintf(buf, sizeof(buf), "CHARGING %d%%", p.battery_pct);
     } else {
-        snprintf(buf, sizeof(buf), "BATTERY %d%%", p.battery_pct);
+        snprintf(buf, sizeof(buf), "%s %d%%", muse_lang_get(p.charging ? "CHARGING" : "Battery level"),
+                 p.battery_pct);
     }
     if (strcmp(buf, lv_label_get_text(s_power_lbl)) != 0) {
-        lv_label_set_text(s_power_lbl, buf);
+        lv_label_set_text(s_power_lbl, muse_lang_get(buf));
     }
 }
 
 static void update_status(muse_mode_t mode, float now)
 {
     uint32_t accent = muse_pixel_accent(mode);
-    const char *name = mode == MUSE_MODE_IDLE ? s_idle_name : MODE_NAMES[mode];
+    const char *name = muse_lang_get(mode == MUSE_MODE_IDLE ? s_idle_name : MODE_NAMES[mode]);
 
     if (name != s_shown_name) {
         lv_label_set_text(s_state_lbl, name);
@@ -1418,13 +1412,15 @@ static void update_status(muse_mode_t mode, float now)
     }
     if (fresh) {
         lv_obj_t *lbl = answer >= 0 ? s_reply_lbl : s_caption_lbl;
+        const char *display_caption = answer >= 0 ? caption : muse_lang_get(caption);
 #if CONFIG_MUSE_CJK_FONT
         if (s_small) {
-            lv_obj_set_style_text_font(s_caption_lbl, muse_text_has_cjk(caption) ? caption_font() : &lv_font_unscii_8, 0);
+            lv_obj_set_style_text_font(s_caption_lbl,
+                                       muse_text_has_cjk(display_caption) ? caption_font() : &lv_font_unscii_8, 0);
         }
 #endif
-        lv_label_set_text(lbl, caption);
-        lv_obj_set_flag(lbl, LV_OBJ_FLAG_HIDDEN, !caption[0]);
+        lv_label_set_text(lbl, display_caption);
+        lv_obj_set_flag(lbl, LV_OBJ_FLAG_HIDDEN, !display_caption[0]);
         if (s_reply_lbl) {
             lv_obj_add_flag(answer >= 0 ? s_caption_lbl : s_reply_lbl, LV_OBJ_FLAG_HIDDEN);
         }

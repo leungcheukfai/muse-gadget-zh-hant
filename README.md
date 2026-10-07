@@ -16,6 +16,8 @@ limitations under the License.
 
 # Muse Gadgets
 
+本社群分支的繁體中文擴充與使用流程：[`README.zh-Hant.md`](README.zh-Hant.md)
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/images/muse-gadgets-dark.png">

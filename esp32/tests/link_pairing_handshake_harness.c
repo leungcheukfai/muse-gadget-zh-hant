@@ -348,7 +348,7 @@ static void provisioning_and_scan_work_cannot_cross_sessions(void) {
 }
 
 static void pairing_confirmed_carries_sdk_token(void) {
-    static const char token[] = "mgst_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    static const char token[] = "test-sdk-token-placeholder";
     char *plain = status_plain_json("pairing_confirmed");
     assert(plain && !strstr(plain, "sdk_token"));
     free(plain);

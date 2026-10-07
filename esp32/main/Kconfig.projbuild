@@ -293,17 +293,24 @@ menu "ESP32 Device SDK"
 
     config HOMEHUB_NVS_ENCRYPTION
         bool "Encrypt NVS with an HMAC-derived key"
+        depends on SOC_HMAC_SUPPORTED
         default n
         select NVS_ENCRYPTION
-        select NVS_SEC_KEY_PROTECT_USING_HMAC
         help
             Encrypt the NVS partition using an HMAC key from eFuse block
-            NVS_SEC_HMAC_EFUSE_KEY_ID (set in the NVS component menu). At
-            first boot, if the chosen block is empty and read-protection can
-            still be set, the application generates a key automatically.
-            Boards with no HMAC key and a locked eFuse fall back to plaintext
-            NVS. When this option is off, NVS is always plaintext regardless
-            of eFuse state.
+            NVS_SEC_HMAC_EFUSE_KEY_ID (set in the NVS component menu). When
+            HOMEHUB_NVS_REQUIRE_EXISTING_HMAC is enabled, the application
+            refuses to boot until that key has been provisioned explicitly.
+
+    config HOMEHUB_NVS_REQUIRE_EXISTING_HMAC
+        bool "Require a pre-provisioned NVS HMAC key"
+        depends on HOMEHUB_NVS_ENCRYPTION
+        default n
+        help
+            Refuse to initialize NVS if the configured eFuse block does not
+            already have HMAC_UP purpose. This prevents first boot from
+            automatically generating a key and permanently writing eFuse.
+            Provision the key explicitly before flashing this configuration.
 
     config HOMEHUB_PAIRING_EFUSE_AUTH
         bool "Enable manufacturer eFuse pairing attestation"

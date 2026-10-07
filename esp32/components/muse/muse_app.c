@@ -19,6 +19,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 
 #include "muse_audio.h"
 #include "muse_battery.h"
@@ -30,6 +31,10 @@
 #include "muse_state.h"
 #include "muse_ui.h"
 #include "muse_voice.h"
+#if CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+#include "muse_lang.h"
+#include "muse_wake.h"
+#endif
 #include "muse_wifi.h"
 
 static const char *TAG = "muse";
@@ -86,7 +91,11 @@ void muse_app_run(const muse_board_t *board)
         ESP_LOGE(TAG, "voice pipeline unavailable");
     } else {
         muse_state_set_mode(MUSE_MODE_IDLE);
+#if CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+        muse_state_set_caption("%s", muse_wake_enabled() ? muse_lang_get("SAY HEY MUSE") : "");
+#else
         muse_state_set_caption("%s", "");   /* the button icons say how to talk */
+#endif
     }
 
     muse_hatch_start();

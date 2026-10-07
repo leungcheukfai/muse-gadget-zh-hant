@@ -71,6 +71,12 @@ session to Muse. The rest depends on the hardware.
 | Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | Off | On | On | On | On | On | Off | On | On |
 | Buttons | BOOT | BOOT | BOOT | BOOT | Top | Green | Green | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | Two | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (flash only) |
 
+On the Waveshare ESP32-S3-Touch-AMOLED-1.75C, local “Hey Muse” detection
+starts the existing voice turn; push-to-talk remains available. It listens
+while awake or on USB power, and stops listening when battery sleep powers the
+codecs down. Detection quality on this board is experimental and needs testing
+with the intended room and microphone gain.
+
 Boards without PSRAM (the ideaspark, the C6 boards and the Cardputer ADV) don't have room for
 the home-network tunnel. Muse can still reach and control them once the
 control session is up. The Waveshare C6 and Cardputer ADV also can't hold their own voice

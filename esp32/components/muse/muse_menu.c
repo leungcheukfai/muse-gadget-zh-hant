@@ -29,7 +29,9 @@
 #include "muse_ble.h"
 #include "muse_board.h"
 #include "muse_chat.h"
+#include "muse_font.h"
 #include "muse_input.h"
+#include "muse_lang.h"
 #include "muse_link.h"
 #include "muse_settings.h"
 #include "muse_state.h"
@@ -149,18 +151,20 @@ static lv_obj_t *s_page;        /* status and power-off confirmation text */
 static lv_obj_t *s_hint_down;
 static lv_obj_t *s_hint_select;
 static const char *s_down_text;
+static char s_down_text_storage[32];
 
 static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, const char *text)
 {
     lv_obj_t *l = lv_label_create(parent);
-    lv_obj_set_style_text_font(l, font, 0);
+    lv_obj_set_style_text_font(l, muse_font_for_ui(font), 0);
     lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
-    lv_label_set_text(l, text);
+    lv_label_set_text(l, muse_lang_get(text));
     return l;
 }
 
 static void set_text(lv_obj_t *l, const char *text)
 {
+    text = muse_lang_get(text);
     if (strcmp(lv_label_get_text(l), text) != 0) {
         lv_label_set_text(l, text);
     }
@@ -169,8 +173,12 @@ static void set_text(lv_obj_t *l, const char *text)
 static void select_hint(const char *action)
 {
     char text[40];
-    snprintf(text, sizeof(text), "%s%s", muse_board->keyboard ? "Enter " : "", action);
-    set_text(s_hint_select, text);
+    if (muse_board->keyboard) {
+        muse_lang_snprintf(text, sizeof(text), "Enter %s", muse_lang_get(action));
+        set_text(s_hint_select, text);
+    } else {
+        set_text(s_hint_select, action);
+    }
 }
 
 static int value_step(const int *steps, int n, int cur, int direction)
@@ -251,11 +259,13 @@ static void status_text(char *buf, size_t n)
         snprintf(batt, sizeof(batt), "%d%%%s", p.battery_pct, p.charging ? " +" : "");
     }
     const char *phone = b.state == MUSE_BLE_OFF ? "Off" : (b.state == MUSE_BLE_CONNECTED ? "Connected" : b.name);
-    snprintf(buf, n, "Wi-Fi %s\nIP    %s\nLink  %s\nMuse  %s\nPhone %s\nPower %s\nVer   %s",
-             w.state == MUSE_WIFI_CONNECTED ? w.ssid : (w.state == MUSE_WIFI_OFF ? "off" : "offline"),
-             w.state == MUSE_WIFI_CONNECTED ? w.ip : "-", muse_link_state_name(muse_link_state()),
-             muse_hatch_state_name(h.state), phone, batt,
-             esp_app_get_description()->version);
+    const char *wifi = w.state == MUSE_WIFI_CONNECTED ? w.ssid :
+                       (w.state == MUSE_WIFI_OFF ? "Off" : "Offline");
+    muse_lang_snprintf(buf, n, "Wi-Fi %s\nIP    %s\nLink  %s\nMuse  %s\nPhone %s\nPower %s\nVer   %s",
+                       muse_lang_get(wifi), w.state == MUSE_WIFI_CONNECTED ? w.ip : "-",
+                       muse_lang_get(muse_link_state_name(muse_link_state())),
+                       muse_lang_get(muse_hatch_state_name(h.state)), muse_lang_get(phone),
+                       batt, esp_app_get_description()->version);
     muse_text_to_ascii(buf, n);   /* network and phone names can have curly quotes */
 }
 
@@ -286,7 +296,7 @@ static void battery_text(char *buf, size_t n)
     }
     if (muse_battery_drain(&b, &rate10, &full_h)) {
         snprintf(rate, sizeof(rate), "%d.%d%%/h", rate10 / 10, rate10 % 10);
-        snprintf(full, sizeof(full), "~%d h", full_h);
+        muse_lang_snprintf(full, sizeof(full), "~%d h", full_h);
     }
     if (b.secs && b.slept_pm >= 0) {
         int per10 = (int)(b.sleeps * 10LL / b.secs);
@@ -295,8 +305,9 @@ static void battery_text(char *buf, size_t n)
     pm_text(off, b.screen_off_pm);
     pm_text(slept, b.slept_pm);
     pm_text(busy, b.busy_pm);
-    snprintf(buf, n, "%s %s\nBatt  %d>%d%%\nRate  %s\nFull  %s\nOff   %s\nSleep %s\nWakes %s\nBusy  %s",
-             b.running ? "On batt" : "Last run", t, b.pct_start, b.pct_now, rate, full, off, slept, wakes, busy);
+    muse_lang_snprintf(buf, n, "%s %s\nBatt  %d>%d%%\nRate  %s\nFull  %s\nOff   %s\nSleep %s\nWakes %s\nBusy  %s",
+                       muse_lang_get(b.running ? "On batt" : "Last run"), t, b.pct_start, b.pct_now,
+                       rate, full, off, slept, wakes, busy);
 }
 
 static void refresh(void)
@@ -353,8 +364,8 @@ static void show(view_t view)
         break;
     case VIEW_POWER: {
         char text[96];
-        snprintf(text, sizeof(text), "Turn Muse off?\n\nPress the %s button to turn it back on.",
-                 muse_board->keyboard ? "GO" : muse_board->aux_button);
+        muse_lang_snprintf(text, sizeof(text), "Turn Muse off?\n\nPress the %s button to turn it back on.",
+                           muse_board->keyboard ? "GO" : muse_board->aux_button);
         set_text(s_title, "POWER OFF");
         set_text(s_page, text);
         set_text(s_hint_down, muse_board->keyboard ? "Esc Cancel" : "Cancel");
@@ -580,13 +591,21 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
     if (aux_side) {
         /* Reads downwards, the arrow pointing down; centred on the icon's
          * spot so it stays put as the text changes. */
-        s_down_text = "Down " LV_SYMBOL_RIGHT;
+        snprintf(s_down_text_storage, sizeof(s_down_text_storage), "%s %s",
+                 muse_lang_get("Down"), LV_SYMBOL_RIGHT);
+        s_down_text = s_down_text_storage;
         lv_obj_set_style_transform_rotation(s_hint_down, 900, 0);
         lv_obj_set_style_transform_pivot_x(s_hint_down, lv_pct(50), 0);
         lv_obj_set_style_transform_pivot_y(s_hint_down, lv_pct(50), 0);
         lv_obj_align(s_hint_down, LV_ALIGN_CENTER, (w - strip) / 2, aux->y);
     } else {
-        s_down_text = muse_board->keyboard ? "Esc Back" : LV_SYMBOL_DOWN " Down";
+        if (muse_board->keyboard) {
+            s_down_text = "Esc Back";
+        } else {
+            snprintf(s_down_text_storage, sizeof(s_down_text_storage), "%s %s",
+                     LV_SYMBOL_DOWN, muse_lang_get("Down"));
+            s_down_text = s_down_text_storage;
+        }
         align_on_bar(s_hint_down, aux->align, pad);
     }
     s_hint_select = label(s_root, font, COLOR_TEXT, "");

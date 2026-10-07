@@ -49,9 +49,6 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "muse_chat_link.c")   # text replies over Link's session
     endif()
     list(APPEND srcs "muse_chat_text.c")
-    if(CONFIG_MUSE_CJK_FONT)
-        list(APPEND srcs "fonts/muse_font_cjk_16.c")   # captions' CJK fallback
-    endif()
     # Your own character (tools/muse/AVATAR_RECIPE.md) stands in for the default
     # avatar when avatar/muse_pixel.c exists here; this avatar/ is gitignored. The
     # default is in avatar/ at the top of the project.
@@ -65,6 +62,10 @@ if(CONFIG_MUSE_ENABLED)
     if(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C OR CONFIG_MUSE_BOARD_WAVESHARE_S3_175)
         # One driver: the 1.75 differs only in pins (its BSP's) and its PWR key.
         list(APPEND srcs "boards/board_waveshare_s3_175c.c" "boards/muse_lcd_bands.c")
+        if(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C)
+            list(APPEND srcs "muse_wake.cpp")
+            list(APPEND embed "models/hey_muse.tflite")
+        endif()
     elseif(CONFIG_MUSE_BOARD_AIPI)
         list(APPEND srcs "boards/board_aipi.c")
     elseif(CONFIG_MUSE_BOARD_ESPRESSIF_BOX_3)
@@ -115,7 +116,7 @@ idf_component_register(
     INCLUDE_DIRS "."
     EMBED_FILES ${embed}
     WHOLE_ARCHIVE   # muse_lv_mem.c provides symbols only LVGL references
-    REQUIRES esp_driver_gpio esp_driver_i2c
+    REQUIRES esp_driver_gpio esp_driver_i2c muse_zh_hant
     PRIV_REQUIRES ${muse_priv_requires}
 )
 
@@ -127,4 +128,14 @@ if(CONFIG_MUSE_ENABLED)
     target_compile_definitions(${lvgl_lib} PUBLIC
         "LV_ASSERT_HANDLER_INCLUDE=<stdlib.h>"
         "LV_ASSERT_HANDLER=abort()\;")
+endif()
+
+if(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C)
+    # Match ESPHome's microWakeWord build flags, and enable Espressif's S3
+    # kernels in the TFLite Micro component itself.
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE
+        TF_LITE_STATIC_MEMORY TF_LITE_DISABLE_X86_NEON ESP_NN)
+    idf_component_get_property(tflite_micro_lib espressif__esp-tflite-micro COMPONENT_LIB)
+    target_compile_definitions(${tflite_micro_lib} PRIVATE
+        TF_LITE_STATIC_MEMORY TF_LITE_DISABLE_X86_NEON ESP_NN)
 endif()

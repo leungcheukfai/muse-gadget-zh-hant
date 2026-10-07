@@ -67,7 +67,9 @@ extern "C" {
 #include "cJSON.h"
 #include "minimp3.h"
 #include "muse_account_api.h"
+#include "muse_fish_tts.h"
 #include "muse_link.h"
+#include "muse_lang.h"
 #include "muse_settings.h"
 #include "muse_wifi.h"
 }
@@ -1197,6 +1199,19 @@ static void send_chat(const char *text, const char *modality)
     s_turn.phase = P_WAIT_REPLY;
 }
 
+/* Keep microphone and typed turns aligned with the selected reply language. */
+static bool send_localized_chat(const char *text)
+{
+    char prompt[1408];
+    int n = muse_lang_build_chat_prompt(muse_settings_reply_language(), text, prompt, sizeof(prompt));
+    if (n < 0 || (size_t)n >= sizeof(prompt)) {
+        turn_fail("MESSAGE TOO LONG");
+        return false;
+    }
+    send_chat(prompt, "text");
+    return true;
+}
+
 static void post_chat(const char *text)
 {
     if (s_turn.chat_posted) {
@@ -1212,19 +1227,21 @@ static void post_chat(const char *text)
         turn_fail("DIDN'T CATCH THAT");
         return;
     }
-    ESP_LOGI(TAG, "heard: \"%s\"", text);
+    ESP_LOGI(TAG, "heard %u characters", (unsigned)strlen(text));
     emit(MUSE_HATCH_EV_HEARD, text);
-    send_chat(text, "text");
+    send_localized_chat(text);
 }
 
-/* A typed turn: the text goes straight to the chat. */
+/* A typed turn from the serial console. */
 static void text_begin(const char *text)
 {
     if (!turn_start(0, true)) {
         return;
     }
     ESP_LOGI(TAG, "typed turn: %u bytes", (unsigned)strlen(text));
-    send_chat(text, "text");
+    if (!send_localized_chat(text)) {
+        return;
+    }
     if (s_turn.phase == P_WAIT_REPLY) {
         mark(M_SENT);
         muse_hatch_console("sent", nullptr, "\"bytes\":%u", (unsigned)strlen(text));
@@ -1501,6 +1518,65 @@ static void on_chat_ack(stream_t *s)
 
 /* ---- Turn: speech ---- */
 
+static size_t utf8_character_count(const char *text)
+{
+    size_t count = 0;
+    for (const unsigned char *p = reinterpret_cast<const unsigned char *>(text); *p; p++) {
+        if ((*p & 0xc0) != 0x80) {
+            count++;
+        }
+    }
+    return count;
+}
+
+typedef struct {
+    int msg;
+    uint32_t gen;
+} tts_output_t;
+
+static bool queue_tts_pcm(const int16_t *pcm, size_t frames, void *context)
+{
+    tts_output_t *output = static_cast<tts_output_t *>(context);
+    msg_t &m = s_turn.msgs[output->msg];
+    while (frames) {
+        if (output->gen != s_gen.load() || output->msg != s_turn.tts_msg) {
+            return false;
+        }
+        size_t room = xStreamBufferSpacesAvailable(s_out) & ~(size_t)1;
+        if (!room) {
+            vTaskDelay(pdMS_TO_TICKS(5));
+            continue;
+        }
+        size_t bytes = frames * sizeof(int16_t);
+        if (bytes > room) {
+            bytes = room;
+        }
+        size_t sent = xStreamBufferSend(s_out, pcm, bytes, 0);
+        if (!sent) {
+            vTaskDelay(pdMS_TO_TICKS(5));
+            continue;
+        }
+        if (sent & 1) {
+            return false;
+        }
+        size_t sent_frames = sent / sizeof(int16_t);
+        s_turn.pcm_out += sent_frames;
+        m.pcm_frames = s_turn.pcm_out - m.pcm_start;
+        mark(M_AUDIO);
+        pcm += sent_frames;
+        frames -= sent_frames;
+    }
+    return true;
+}
+
+static void wipe_secret(char *secret, size_t len)
+{
+    volatile char *p = secret;
+    while (len--) {
+        *p++ = 0;
+    }
+}
+
 static void start_tts(void)
 {
     if (s_turn.tts_msg >= 0) {
@@ -1511,23 +1587,54 @@ static void start_tts(void)
         if (m.tts != TTS_QUEUED) {
             continue;
         }
-        /*
-         * Replies are text, shown at reading pace: silence in place of speech
-         * paces the captions and ends the turn. To speak them instead, send
-         * the message's text (s_turn.texts + i * TEXT_MAX, if texts was
-         * allocated; up to TEXT_MAX - 1 bytes) to a TTS API of your choice and
-         * play the MP3 it returns. In place of the silence below: keep
-         * m.tts = TTS_ACTIVE and s_turn.tts_msg = i, set s_turn.silent = false,
-         * m.pcm_start = s_turn.pcm_out, m.pcm_frames = 0, s_turn.mp3_len = 0,
-         * s_turn.mp3_ended = false, s_turn.kbps = 0, s_turn.down_rate = 0 and
-         * mp3dec_init(&s_turn.dec). Then, on this task, pass the MP3 to
-         * tts_data() as it arrives (it buffers up to MP3_BUF and drops the
-         * rest, so hold off while it's full) and set s_turn.mp3_ended at the
-         * end. decode() plays it at the speaker's volume, captions following,
-         * and finishes the message once it's drained.
-         */
+        const char *text = s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
+        muse_reply_language_t language = muse_settings_reply_language();
+        char fish_api_key[MUSE_FISH_API_KEY_MAX + 1] = {};
+        char fish_voice_id[MUSE_FISH_VOICE_ID_MAX + 1] = {};
+        if (muse_settings_speaker_on() && text) {
+            muse_settings_fish_api_key(fish_api_key);
+            muse_settings_fish_voice_id(language, fish_voice_id);
+        }
+        const bool use_fish = fish_api_key[0] && fish_voice_id[0];
+        if (use_fish) {
+            m.pcm_start = s_turn.pcm_out;
+            m.pcm_frames = 0;
+            m.tts = TTS_ACTIVE;
+            s_turn.tts_msg = i;
+            s_turn.silent = false;
+            ESP_LOGI(TAG, "generating Fish Audio speech for message %s", m.id);
+            show_reply_start(m);
+
+            tts_output_t output = { i, s_turn.gen };
+            esp_err_t err = muse_fish_tts_generate(fish_api_key, text, fish_voice_id,
+                                                   queue_tts_pcm, &output);
+            wipe_secret(fish_api_key, sizeof(fish_api_key));
+            wipe_secret(fish_voice_id, sizeof(fish_voice_id));
+            if (output.gen != s_gen.load()) {
+                return;
+            }
+            if (err == ESP_OK) {
+                m.tts = TTS_FINISHED;
+                s_turn.tts_msg = -1;
+                ESP_LOGI(TAG, "Fish Audio speech ready (%u frames)", (unsigned)m.pcm_frames);
+            } else if (m.pcm_frames) {
+                m.tts = TTS_FINISHED;
+                s_turn.tts_msg = -1;
+                ESP_LOGW(TAG, "Fish Audio speech stopped after %u frames", (unsigned)m.pcm_frames);
+            } else {
+                m.pcm_frames = (uint32_t)(utf8_character_count(text) * MIC_RATE / TEXT_CHARS_PER_S);
+                s_turn.silent = true;
+                ESP_LOGW(TAG, "Fish Audio speech unavailable (%s); showing captions", esp_err_to_name(err));
+            }
+            return;
+        }
+        wipe_secret(fish_api_key, sizeof(fish_api_key));
+        wipe_secret(fish_voice_id, sizeof(fish_voice_id));
+
+        /* With no Fish Audio key or voice configured, pace captions without audio. */
         m.pcm_start = s_turn.pcm_out;
-        m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+        const char *caption = s_turn.texts ? s_turn.texts + i * TEXT_MAX : m.tail;
+        m.pcm_frames = (uint32_t)(utf8_character_count(caption) * MIC_RATE / TEXT_CHARS_PER_S);
         m.tts = TTS_ACTIVE;
         s_turn.tts_msg = i;
         s_turn.silent = true;
