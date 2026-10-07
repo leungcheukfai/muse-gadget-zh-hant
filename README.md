@@ -14,9 +14,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-# Muse Gadgets
+# Muse Gadget Traditional Chinese Add-on
 
-本社群分支的繁體中文擴充與使用流程：[`README.zh-Hant.md`](README.zh-Hant.md)
+This community fork adds Traditional Chinese support to the Muse ESP32 Device
+SDK. It includes a CJK UI font, Traditional Chinese captions, selectable
+Cantonese or Mandarin speech, and direct Fish Audio text-to-speech.
+
+The add-on currently supports the Waveshare ESP32-S3-Touch-AMOLED-1.75C,
+Waveshare 1.75, and M5Stack CoreS3. It is linked into each board's firmware at
+build time, so it is a source add-on rather than a runtime plugin.
+
+For setup, flashing, Fish Audio configuration, and device security, see the
+[Traditional Chinese guide](README.zh-Hant.md). Fish Audio users enter their
+own API key and language-specific voice IDs through the BLE setup page; the
+key is stored in encrypted NVS and sent directly to Fish Audio over HTTPS.
+
+Each firmware builder must configure their own Muse SDK token in local build
+settings. This repository does not include the maintainer's token or a shared
+developer credential. Do not commit `sdkconfig` files or firmware images that
+contain credentials.
+
+## About Muse Gadgets
 
 <p align="center">
   <picture>
