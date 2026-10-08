@@ -1282,7 +1282,7 @@ static void build_language_page(lv_obj_t *tile)
     row(list, NULL, "Cantonese", &s_language_cantonese, on_language_cantonese, NULL);
     row(list, NULL, "Mandarin", &s_language_mandarin, on_language_mandarin, NULL);
     s_language_fish_status = note(list, "");
-    note(list, "Enter your Fish Audio API key and voice IDs in Phone setup to enable speech.");
+    note(list, "Set your Fish Audio API key and voice IDs in menuconfig to enable speech.");
 }
 
 static void tick_language(void)
@@ -1290,9 +1290,12 @@ static void tick_language(void)
     bool cantonese = muse_settings_reply_language() == MUSE_REPLY_CANTONESE;
     set_text(s_language_cantonese, cantonese ? "Selected" : "");
     set_text(s_language_mandarin, cantonese ? "" : "Selected");
-    set_text(s_language_fish_status, muse_settings_fish_api_key_len()
-                                         ? "Fish Audio: API key saved"
-                                         : "Fish Audio: API key not set");
+    const char *voice_id = cantonese ? CONFIG_MUSE_FISH_AUDIO_CANTONESE_VOICE_ID
+                                     : CONFIG_MUSE_FISH_AUDIO_MANDARIN_VOICE_ID;
+    set_text(s_language_fish_status,
+             CONFIG_MUSE_FISH_AUDIO_API_KEY[0] && voice_id[0]
+                 ? "Fish Audio: speech ready"
+                 : "Fish Audio: captions only");
 }
 
 /* ---------- Home ---------- */

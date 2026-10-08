@@ -45,9 +45,6 @@ static struct {
     char host[MUSE_HOST_MAX + 1];
     char vm[MUSE_VM_MAX + 1];
     char token[MUSE_TOKEN_MAX + 1];
-    char fish_api_key[MUSE_FISH_API_KEY_MAX + 1];
-    char fish_cantonese_voice[MUSE_FISH_VOICE_ID_MAX + 1];
-    char fish_mandarin_voice[MUSE_FISH_VOICE_ID_MAX + 1];
     uint8_t reply_language;
 } s = {
     .volume = CONFIG_MUSE_DEFAULT_VOLUME,
@@ -94,24 +91,13 @@ static esp_err_t save_str(const char *key, const char *v)
     return err == ESP_OK ? nvs_commit(s_nvs) : err;
 }
 
-static bool valid_fish_voice_id(const char *voice_id)
-{
-    if (!voice_id[0]) {
-        return true;
-    }
-    for (const unsigned char *p = (const unsigned char *)voice_id; *p; p++) {
-        if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
-              (*p >= '0' && *p <= '9') || *p == '-' || *p == '_')) {
-            return false;
-        }
-    }
-    return true;
-}
-
-/* Remove provider credentials left by older firmware after switching to Fish Audio. */
+/* Remove speech-provider credentials stored by older firmware. */
 static esp_err_t erase_legacy_tts_settings(void)
 {
-    static const char *const keys[] = { "gemini_key", "canto_url", "canto_token" };
+    static const char *const keys[] = {
+        "gemini_key", "canto_url", "canto_token",
+        "fish_api_key", "fish_voice_yue", "fish_voice_zh",
+    };
     bool changed = false;
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         esp_err_t err = nvs_erase_key(s_nvs, keys[i]);
@@ -122,18 +108,6 @@ static esp_err_t erase_legacy_tts_settings(void)
         }
     }
     return changed ? nvs_commit(s_nvs) : ESP_OK;
-}
-
-/* Drop any uncommitted NVS mutations after a write failure. */
-static void reopen_nvs(void)
-{
-    nvs_close(s_nvs);
-    s_nvs = 0;
-    esp_err_t err = nvs_open(NS, NVS_READWRITE, &s_nvs);
-    if (err != ESP_OK) {
-        s_nvs = 0;
-        ESP_LOGE(TAG, "could not reopen settings after a failed NVS write: %s", esp_err_to_name(err));
-    }
 }
 
 static void notify(muse_setting_t what)
@@ -179,11 +153,6 @@ esp_err_t muse_settings_init(void)
     load_str("host", s.host, sizeof(s.host));
     load_str("vm", s.vm, sizeof(s.vm));
     load_str("token", s.token, sizeof(s.token));
-#if CONFIG_HOMEHUB_NVS_ENCRYPTION
-    load_str("fish_api_key", s.fish_api_key, sizeof(s.fish_api_key));
-#endif
-    load_str("fish_voice_yue", s.fish_cantonese_voice, sizeof(s.fish_cantonese_voice));
-    load_str("fish_voice_zh", s.fish_mandarin_voice, sizeof(s.fish_mandarin_voice));
     load_u8("reply_lang", &s.reply_language);
 
     s.volume = clampi(s.volume, 0, 100);
@@ -242,24 +211,6 @@ size_t muse_settings_hatch_token_len(void)
     size_t n;
     LOCKED(n = strlen(s.token));
     return n;
-}
-
-void muse_settings_fish_api_key(char out[MUSE_FISH_API_KEY_MAX + 1])
-{
-    LOCKED(strlcpy(out, s.fish_api_key, MUSE_FISH_API_KEY_MAX + 1));
-}
-
-size_t muse_settings_fish_api_key_len(void)
-{
-    size_t n;
-    LOCKED(n = strlen(s.fish_api_key));
-    return n;
-}
-
-void muse_settings_fish_voice_id(muse_reply_language_t language, char out[MUSE_FISH_VOICE_ID_MAX + 1])
-{
-    LOCKED(strlcpy(out, language == MUSE_REPLY_MANDARIN ? s.fish_mandarin_voice : s.fish_cantonese_voice,
-                   MUSE_FISH_VOICE_ID_MAX + 1));
 }
 
 muse_reply_language_t muse_settings_reply_language(void)
@@ -368,72 +319,6 @@ esp_err_t muse_settings_set_hatch_token(const char *token, bool append)
     });
     if (err == ESP_OK) {
         notify(MUSE_SETTING_HATCH);
-    }
-    return err;
-}
-
-esp_err_t muse_settings_set_fish_api_key(const char *key, bool append)
-{
-#if !CONFIG_HOMEHUB_NVS_ENCRYPTION
-    (void)key;
-    (void)append;
-    return ESP_ERR_NOT_SUPPORTED;
-#else
-    esp_err_t err = ESP_OK;
-    char previous[MUSE_FISH_API_KEY_MAX + 1];
-    LOCKED({
-        memcpy(previous, s.fish_api_key, sizeof(previous));
-        size_t have = append ? strlen(s.fish_api_key) : 0;
-        size_t add = strlen(key ? key : "");
-        if (have + add > MUSE_FISH_API_KEY_MAX) {
-            err = ESP_ERR_INVALID_SIZE;
-        } else {
-            if (!append) {
-                memset(s.fish_api_key, 0, sizeof(s.fish_api_key));
-            }
-            memcpy(s.fish_api_key + have, key ? key : "", add);
-            s.fish_api_key[have + add] = '\0';
-            err = save_str("fish_api_key", s.fish_api_key);
-            if (err != ESP_OK) {
-                memcpy(s.fish_api_key, previous, sizeof(previous));
-                reopen_nvs();
-            }
-        }
-    });
-    memset(previous, 0, sizeof(previous));
-    if (err == ESP_OK) {
-        notify(MUSE_SETTING_FISH);
-    }
-    return err;
-#endif
-}
-
-esp_err_t muse_settings_set_fish_voice_id(muse_reply_language_t language, const char *voice_id)
-{
-    const char *value = voice_id ? voice_id : "";
-    if (strlen(value) > MUSE_FISH_VOICE_ID_MAX) {
-        return ESP_ERR_INVALID_SIZE;
-    }
-    if (!valid_fish_voice_id(value)) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    esp_err_t err = ESP_OK;
-    char previous[MUSE_FISH_VOICE_ID_MAX + 1];
-    LOCKED({
-        char *stored = language == MUSE_REPLY_MANDARIN ? s.fish_mandarin_voice : s.fish_cantonese_voice;
-        const char *key = language == MUSE_REPLY_MANDARIN ? "fish_voice_zh" : "fish_voice_yue";
-        memcpy(previous, stored, sizeof(previous));
-        strlcpy(stored, value, MUSE_FISH_VOICE_ID_MAX + 1);
-        err = save_str(key, stored);
-        if (err != ESP_OK) {
-            memcpy(stored, previous, sizeof(previous));
-            reopen_nvs();
-        }
-    });
-    memset(previous, 0, sizeof(previous));
-    if (err == ESP_OK) {
-        notify(MUSE_SETTING_FISH);
     }
     return err;
 }

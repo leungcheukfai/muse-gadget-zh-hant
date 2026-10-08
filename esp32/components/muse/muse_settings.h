@@ -35,8 +35,6 @@
 #define MUSE_HOST_MAX 63
 #define MUSE_VM_MAX 63
 #define MUSE_TOKEN_MAX 1023
-#define MUSE_FISH_API_KEY_MAX 256
-#define MUSE_FISH_VOICE_ID_MAX 128
 
 #define MUSE_MIC_GAIN_MAX 36      /* dB; ES7210 PGA, applied in 3 dB steps */
 
@@ -49,7 +47,6 @@ typedef enum {
     MUSE_SETTING_WIFI,          /* on/off or credentials */
     MUSE_SETTING_BLE,
     MUSE_SETTING_HATCH,
-    MUSE_SETTING_FISH,
     MUSE_SETTING_LANGUAGE,
 } muse_setting_t;
 
@@ -71,10 +68,7 @@ void muse_settings_hatch_host(char out[MUSE_HOST_MAX + 1]);
 void muse_settings_hatch_vm(char out[MUSE_VM_MAX + 1]);
 void muse_settings_hatch_token(char out[MUSE_TOKEN_MAX + 1]);
 size_t muse_settings_hatch_token_len(void);
-void muse_settings_fish_api_key(char out[MUSE_FISH_API_KEY_MAX + 1]);
-size_t muse_settings_fish_api_key_len(void);
 muse_reply_language_t muse_settings_reply_language(void);
-void muse_settings_fish_voice_id(muse_reply_language_t language, char out[MUSE_FISH_VOICE_ID_MAX + 1]);
 
 void muse_settings_set_volume(int pct);
 void muse_settings_set_speaker_on(bool on);
@@ -90,8 +84,4 @@ void muse_settings_set_hatch_host(const char *host);
 void muse_settings_set_hatch_vm(const char *vm);
 /* append=true adds to the stored token (for chunked BLE writes). */
 esp_err_t muse_settings_set_hatch_token(const char *token, bool append);
-/* Fish Audio credentials are entered over authenticated BLE; the API key
- * requires encrypted NVS. Voice IDs are optional model references. */
-esp_err_t muse_settings_set_fish_api_key(const char *key, bool append);
-esp_err_t muse_settings_set_fish_voice_id(muse_reply_language_t language, const char *voice_id);
 void muse_settings_set_reply_language(muse_reply_language_t language);

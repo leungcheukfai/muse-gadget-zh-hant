@@ -56,6 +56,7 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "esp_tls.h"
+#include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/queue.h"
@@ -1569,14 +1570,6 @@ static bool queue_tts_pcm(const int16_t *pcm, size_t frames, void *context)
     return true;
 }
 
-static void wipe_secret(char *secret, size_t len)
-{
-    volatile char *p = secret;
-    while (len--) {
-        *p++ = 0;
-    }
-}
-
 static void start_tts(void)
 {
     if (s_turn.tts_msg >= 0) {
@@ -1589,13 +1582,11 @@ static void start_tts(void)
         }
         const char *text = s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
         muse_reply_language_t language = muse_settings_reply_language();
-        char fish_api_key[MUSE_FISH_API_KEY_MAX + 1] = {};
-        char fish_voice_id[MUSE_FISH_VOICE_ID_MAX + 1] = {};
-        if (muse_settings_speaker_on() && text) {
-            muse_settings_fish_api_key(fish_api_key);
-            muse_settings_fish_voice_id(language, fish_voice_id);
-        }
-        const bool use_fish = fish_api_key[0] && fish_voice_id[0];
+        const char *fish_api_key = CONFIG_MUSE_FISH_AUDIO_API_KEY;
+        const char *fish_voice_id = language == MUSE_REPLY_MANDARIN
+                                        ? CONFIG_MUSE_FISH_AUDIO_MANDARIN_VOICE_ID
+                                        : CONFIG_MUSE_FISH_AUDIO_CANTONESE_VOICE_ID;
+        const bool use_fish = muse_settings_speaker_on() && text && fish_api_key[0] && fish_voice_id[0];
         if (use_fish) {
             m.pcm_start = s_turn.pcm_out;
             m.pcm_frames = 0;
@@ -1608,8 +1599,6 @@ static void start_tts(void)
             tts_output_t output = { i, s_turn.gen };
             esp_err_t err = muse_fish_tts_generate(fish_api_key, text, fish_voice_id,
                                                    queue_tts_pcm, &output);
-            wipe_secret(fish_api_key, sizeof(fish_api_key));
-            wipe_secret(fish_voice_id, sizeof(fish_voice_id));
             if (output.gen != s_gen.load()) {
                 return;
             }
@@ -1628,9 +1617,6 @@ static void start_tts(void)
             }
             return;
         }
-        wipe_secret(fish_api_key, sizeof(fish_api_key));
-        wipe_secret(fish_voice_id, sizeof(fish_voice_id));
-
         /* With no Fish Audio key or voice configured, pace captions without audio. */
         m.pcm_start = s_turn.pcm_out;
         const char *caption = s_turn.texts ? s_turn.texts + i * TEXT_MAX : m.tail;

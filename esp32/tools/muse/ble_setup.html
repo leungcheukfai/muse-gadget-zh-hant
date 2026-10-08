@@ -94,25 +94,6 @@
     </section>
 
     <section>
-      <h2>Fish Audio 語音</h2>
-      <label for="fish-key">自己的 Fish Audio API 金鑰</label>
-      <input id="fish-key" type="password" autocomplete="off" maxlength="256" placeholder="貼上 Fish Audio API 金鑰">
-      <button id="fish-key-save">儲存 API 金鑰</button>
-      <button id="fish-key-clear" class="secondary">清除 API 金鑰</button>
-      <label for="fish-cantonese-voice">廣東話 Fish Audio voice ID</label>
-      <input id="fish-cantonese-voice" type="text" autocomplete="off" maxlength="128" placeholder="Fish Audio 語音模型 ID">
-      <button id="fish-cantonese-save">儲存廣東話 voice ID</button>
-      <button id="fish-cantonese-clear" class="secondary">清除廣東話 voice ID</button>
-      <label for="fish-mandarin-voice">普通話 Fish Audio voice ID</label>
-      <input id="fish-mandarin-voice" type="text" autocomplete="off" maxlength="128" placeholder="Fish Audio 語音模型 ID">
-      <button id="fish-mandarin-save">儲存普通話 voice ID</button>
-      <button id="fish-mandarin-clear" class="secondary">清除普通話 voice ID</button>
-      <p class="dim">輸入自己的 Fish Audio API 金鑰，以及各語言使用的 voice ID。選擇回覆語言後，Muse 會用對應 voice ID 朗讀。金鑰只在此頁暫存，經已驗證的藍牙傳送後會清空，並儲存在裝置的加密 NVS；Muse 會經 HTTPS 直接連線 Fish Audio，不需要本機語音伺服器或常駐電腦。未設定金鑰或所選語言的 voice ID 時，Muse 只顯示字幕。</p>
-      <p class="dim"><a href="https://fish.audio/" target="_blank" rel="noopener">在 Fish Audio 管理 API 金鑰和語音模型</a></p>
-      <div id="fish-status" class="dim"></div>
-    </section>
-
-    <section>
       <h2>音效與休眠</h2>
       <label>音量 <span id="volume-v"></span></label>
       <input id="volume" type="range" min="0" max="100">
@@ -140,7 +121,6 @@ const SVC    = '4d757365-0001-4000-8000-6a6f6c6c7900';
 const CMD    = '4d757365-0002-4000-8000-6a6f6c6c7900';
 const STATUS = '4d757365-0003-4000-8000-6a6f6c6c7900';
 const TOKEN_CHUNK = 180;   // stays well under the 512-byte attribute limit
-const FISH_KEY_CHUNK = 100;
 
 const $ = id => document.getElementById(id);
 let device, cmdChar, statusChar, queue = Promise.resolve();
@@ -219,37 +199,6 @@ $('connect').onclick = () => {
   connect().catch(e => log(e.message, 'bad'));
 };
 $('disconnect').onclick = () => device?.gatt.disconnect();
-
-$('fish-key-save').onclick = async () => {
-  const key = $('fish-key').value.trim();
-  if (!key) { log('請輸入 Fish Audio API 金鑰；要移除金鑰請按「清除 API 金鑰」', 'bad'); return; }
-  for (let i = 0; i < key.length; i += FISH_KEY_CHUNK) {
-    await send(i ? 'fish.key+' : 'fish.key', key.slice(i, i + FISH_KEY_CHUNK));
-  }
-  $('fish-key').value = '';
-  $('fish-status').textContent = 'API 金鑰已傳送；請查看連線記錄確認結果。';
-};
-$('fish-key-clear').onclick = async () => {
-  await send('fish.key', '');
-  $('fish-key').value = '';
-  $('fish-status').textContent = '已傳送清除 API 金鑰命令；請查看連線記錄確認結果。';
-};
-
-async function saveFishVoice(inputId, command, statusText) {
-  const voiceId = $(inputId).value.trim();
-  if (!voiceId) { log('請輸入 Fish Audio voice ID；要移除 voice ID 請按「清除」', 'bad'); return; }
-  await send(command, voiceId);
-  $('fish-status').textContent = `${statusText}已傳送；請查看連線記錄確認結果。`;
-}
-async function clearFishVoice(inputId, command, statusText) {
-  await send(command, '');
-  $(inputId).value = '';
-  $('fish-status').textContent = `${statusText}已清除；請查看連線記錄確認結果。`;
-}
-$('fish-cantonese-save').onclick = () => saveFishVoice('fish-cantonese-voice', 'fish.voice.cantonese', '廣東話 voice ID ');
-$('fish-cantonese-clear').onclick = () => clearFishVoice('fish-cantonese-voice', 'fish.voice.cantonese', '廣東話 voice ID ');
-$('fish-mandarin-save').onclick = () => saveFishVoice('fish-mandarin-voice', 'fish.voice.mandarin', '普通話 voice ID ');
-$('fish-mandarin-clear').onclick = () => clearFishVoice('fish-mandarin-voice', 'fish.voice.mandarin', '普通話 voice ID ');
 
 $('wifi-join').onclick = async () => {
   const ssid = $('ssid').value.trim();

@@ -18,16 +18,21 @@ limitations under the License.
 
 This community fork adds Traditional Chinese support to the Muse ESP32 Device
 SDK. It includes a CJK UI font, Traditional Chinese captions, selectable
-Cantonese or Mandarin speech, and direct Fish Audio text-to-speech.
+Cantonese or Mandarin speech, direct Fish Audio text-to-speech, and local
+hands-free wake detection for “Hey Muse” on the Waveshare 1.75C. The wake phrase
+is currently English; after wake, the selected reply language controls the
+Cantonese or Mandarin response.
 
 The add-on currently supports the Waveshare ESP32-S3-Touch-AMOLED-1.75C,
 Waveshare 1.75, and M5Stack CoreS3. It is linked into each board's firmware at
 build time, so it is a source add-on rather than a runtime plugin.
 
 For setup, flashing, Fish Audio configuration, and device security, see the
-[Traditional Chinese guide](README.zh-Hant.md). Fish Audio users enter their
-own API key and language-specific voice IDs through the BLE setup page; the
-key is stored in encrypted NVS and sent directly to Fish Audio over HTTPS.
+[Traditional Chinese guide](README.zh-Hant.md). Each builder configures their
+own Fish Audio API key and Cantonese/Mandarin voice IDs in the local ESP-IDF
+`menuconfig`. The key is compiled into that builder's firmware image, so keep
+the local `sdkconfig` and resulting firmware private. The BLE setup page is
+still used for Wi-Fi and Muse provisioning; it does not handle Fish Audio.
 
 Each firmware builder must configure their own Muse SDK token in local build
 settings. This repository does not include the maintainer's token or a shared

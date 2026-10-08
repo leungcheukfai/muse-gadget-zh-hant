@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Build or flash Home Link for one board:
-#   tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535|lcd7> [serial|port]
+# Configure, build or flash one board:
+#   tools/muse/board.sh menuconfig|build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535|lcd7> [serial|port]
 # Build log: /tmp/muse_build_<board>.log. flash finds the board's port by its
 # USB device (tools/muse/ports.py); with several of a kind attached, pass the
 # one's USB serial number (the MAC on native USB) or its port. Flashing from a
@@ -23,7 +23,11 @@
 # flashes in build-muse-<profile>-bench/, so neither build's sdkconfig hides
 # the other's.
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535|lcd7}
+cmd=${1:?menuconfig|build|flash}; board=${2:?s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535|lcd7}
+case $cmd in
+    menuconfig|build|flash) ;;
+    *) echo "unknown command $cmd"; exit 2 ;;
+esac
 root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
@@ -63,13 +67,21 @@ if [ -n "${MUSE_BENCH:-}" ]; then
     B=$B-bench; defaults="$defaults;devices/sdkconfig.muse-bench"
 fi
 log=/tmp/muse_build_$board.log
+clean() { for _ in 1 2 3; do rm -rf managed_components dependencies.lock 2>/dev/null && return; sleep 1; done; }
+if [ "$cmd" = menuconfig ]; then
+    clean
+    idf.py -B "$B" -DIDF_TARGET="$target" -DSDKCONFIG="$B/sdkconfig" \
+        -DSDKCONFIG_DEFAULTS="$defaults" menuconfig
+    rc=$?
+    clean
+    exit $rc
+fi
 if [ "$cmd" = build ]; then
     # Boards share managed_components/ with each other and with the Link build,
     # so build one at a time. Each resolves a different dependency set, and the
     # component manager fails partway through pruning the last one's (lvgl), so
     # start clean and leave nothing behind. Something on the host (an indexer)
     # can recreate files mid-delete, so retry.
-    clean() { for _ in 1 2 3; do rm -rf managed_components dependencies.lock 2>/dev/null && return; sleep 1; done; }
     clean
     idf.py -B $B -DIDF_TARGET=$target -DSDKCONFIG=$B/sdkconfig \
         -DSDKCONFIG_DEFAULTS="$defaults" \

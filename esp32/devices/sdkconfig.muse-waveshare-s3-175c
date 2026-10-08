@@ -67,7 +67,7 @@ CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
 CONFIG_PM_PROFILING=y
 
-# Encrypted NVS protects the user's Fish Audio API key and device settings at rest.
+# Encrypted NVS protects the device's persisted settings at rest.
 # Require the already-provisioned HMAC_UP key in eFuse block 0; never generate
 # or burn an eFuse key automatically during first boot.
 CONFIG_HOMEHUB_NVS_ENCRYPTION=y

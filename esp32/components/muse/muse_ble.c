@@ -157,23 +157,6 @@ static void run_command(char *cmd)
         if (muse_settings_set_hatch_token(v, cmd[11] == '+') != ESP_OK) {
             res = "error: token too long";
         }
-    } else if (!strcmp(cmd, "fish.key") || !strcmp(cmd, "fish.key+")) {
-        esp_err_t err = muse_settings_set_fish_api_key(v, cmd[8] == '+');
-        if (err == ESP_ERR_NOT_SUPPORTED) {
-            res = "error: encrypted NVS required for Fish Audio API key";
-        } else if (err != ESP_OK) {
-            res = "error: Fish Audio API key too long";
-        }
-    } else if (!strcmp(cmd, "fish.voice.cantonese")) {
-        esp_err_t err = muse_settings_set_fish_voice_id(MUSE_REPLY_CANTONESE, v);
-        if (err != ESP_OK) {
-            res = "error: invalid Fish Audio Cantonese voice ID";
-        }
-    } else if (!strcmp(cmd, "fish.voice.mandarin")) {
-        esp_err_t err = muse_settings_set_fish_voice_id(MUSE_REPLY_MANDARIN, v);
-        if (err != ESP_OK) {
-            res = "error: invalid Fish Audio Mandarin voice ID";
-        }
     } else if (!strcmp(cmd, "reply.language")) {
         if (!strcmp(v, "cantonese")) {
             muse_settings_set_reply_language(MUSE_REPLY_CANTONESE);
@@ -201,8 +184,7 @@ static void run_command(char *cmd)
     }
 
     /* Never echo secrets back. */
-    bool secret = !strcmp(cmd, "wifi.pass") || !strncmp(cmd, "hatch.token", 11) ||
-                  !strncmp(cmd, "fish.key", 8);
+    bool secret = !strcmp(cmd, "wifi.pass") || !strncmp(cmd, "hatch.token", 11);
     snprintf(s_last, sizeof(s_last), "%s: %s", cmd, res);
     ESP_LOGI(TAG, "cmd %s%s%s -> %s", cmd, secret ? "" : "=", secret ? "" : v, res);
     muse_state_poke();

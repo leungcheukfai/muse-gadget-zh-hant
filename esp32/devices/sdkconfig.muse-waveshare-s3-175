@@ -65,7 +65,7 @@ CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
 CONFIG_PM_PROFILING=y
 
-# Fish Audio keys and device settings use encrypted NVS. Provision eFuse block 0
+# Device settings use encrypted NVS. Provision eFuse block 0
 # with an HMAC_UP key before flashing; the firmware refuses to generate one.
 CONFIG_HOMEHUB_NVS_ENCRYPTION=y
 CONFIG_HOMEHUB_NVS_REQUIRE_EXISTING_HMAC=y

@@ -32,6 +32,31 @@ menu "ESP32 Device SDK"
             app inside the encrypted pairing session and includes it when it
             refreshes its device token.
 
+    menu "Fish Audio speech"
+
+        config MUSE_FISH_AUDIO_API_KEY
+            string "Fish Audio API key"
+            default ""
+            help
+                Your personal Fish Audio API key. It is compiled into the
+                firmware image and also saved in this build's sdkconfig file.
+                Anyone with the image can recover the key. Keep both private;
+                do not commit or distribute them.
+
+        config MUSE_FISH_AUDIO_CANTONESE_VOICE_ID
+            string "Fish Audio Cantonese voice ID"
+            default ""
+            help
+                Fish Audio voice reference ID used for Cantonese replies.
+
+        config MUSE_FISH_AUDIO_MANDARIN_VOICE_ID
+            string "Fish Audio Mandarin voice ID"
+            default ""
+            help
+                Fish Audio voice reference ID used for Mandarin replies.
+
+    endmenu
+
     config HOMEHUB_WIFI_SSID
         string "WiFi SSID override (dev iteration)"
         default ""

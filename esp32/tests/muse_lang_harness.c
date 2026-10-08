@@ -23,9 +23,8 @@ int main(void)
     assert(strcmp(muse_lang_get("Language"), "語言") == 0);
     assert(strcmp(muse_lang_get("Cantonese"), "廣東話") == 0);
     assert(strcmp(muse_lang_get("Mandarin"), "普通話") == 0);
-    assert(strcmp(muse_lang_get("Fish Audio: API key saved"), "Fish Audio：API 金鑰已儲存") == 0);
-    assert(strcmp(muse_lang_get("Fish Audio: API key not set"), "Fish Audio：尚未設定 API 金鑰") == 0);
-    assert(strcmp(muse_lang_get("Fish Audio voice ID (Cantonese)"), "Fish Audio 語音 ID（廣東話）") == 0);
+    assert(strcmp(muse_lang_get("Fish Audio: speech ready"), "Fish Audio：語音已就緒") == 0);
+    assert(strcmp(muse_lang_get("Fish Audio: captions only"), "Fish Audio：只顯示字幕") == 0);
     assert(strcmp(muse_lang_get("Show"), "顯示") == 0);
     assert(strcmp(muse_lang_get("Hide"), "隱藏") == 0);
     assert(strcmp(muse_lang_get("No networks found"), "找不到 Wi-Fi 網絡") == 0);
